@@ -201,11 +201,15 @@ rs.GrabEvents.ExtendGrabLine.OnClientEvent:Connect(function(...)
         end
     end
 end)
-
-local Window = Library:CreateWindow({
-    Title = "VTX_Hub",
-    Footer = "version: 1.0.0",
-    NotifySide = "Right",
+Window = Library:CreateWindow({
+    SidebarCompacted = false,
+    SearchbarSize = UDim2.fromScale(0.5, 1),
+    Title = 'VTX_Hub',
+    Footer = 'version: 1.0.0',
+    IconSize = UDim2.fromOffset(40, 40),
+    SidebarCompactWidth = 50,
+    CornerRadius = 13,
+    BackgroundImage = "rbxassetid://0"
 })
 local Tabs = {
 	Main = Window:AddTab("Main"),
@@ -330,6 +334,79 @@ box:AddToggle("ViewPCLD", {
                     v.Transparency = 1
                 end
             end
+        end
+    end
+})
+local Players = game:GetService("Players")
+
+local function AddESP(plr)
+    if plr == Players.LocalPlayer then return end
+
+    local function Apply(char)
+        if char:FindFirstChild("VTX_ESP") then return end
+
+        -- Highlight
+        local hl = Instance.new("Highlight")
+        hl.Name = "VTX_ESP"
+        hl.FillTransparency = 1
+        hl.OutlineTransparency = 0
+        hl.OutlineColor = Color3.fromRGB(255,255,255)
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.Parent = char
+
+        -- Nome
+        local head = char:FindFirstChild("Head")
+        if head then
+            local bill = Instance.new("BillboardGui")
+            bill.Name = "VTX_NameESP"
+            bill.Size = UDim2.new(0, 200, 0, 40)
+            bill.StudsOffset = Vector3.new(0, 2.5, 0)
+            bill.AlwaysOnTop = true
+            bill.Parent = head
+
+            local txt = Instance.new("TextLabel")
+            txt.Size = UDim2.new(0.5, 0, 0.5, 0)
+            txt.BackgroundTransparency = 1
+            txt.Text = plr.Name
+            txt.TextColor3 = Color3.fromRGB(255,0,255)
+            txt.TextStrokeTransparency = 0
+            txt.TextScaled = true
+            txt.Font = Enum.Font.SourceSansBold
+            txt.Parent = bill
+        end
+    end
+
+    if plr.Character then
+        Apply(plr.Character)
+    end
+
+    plr.CharacterAdded:Connect(Apply)
+end
+
+local function RemoveESP()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Character then
+            local esp = plr.Character:FindFirstChild("VTX_ESP")
+            if esp then esp:Destroy() end
+
+            local head = plr.Character:FindFirstChild("Head")
+            if head then
+                local nameesp = head:FindFirstChild("VTX_NameESP")
+                if nameesp then nameesp:Destroy() end
+            end
+        end
+    end
+end
+box:AddToggle("PlayerESP", {
+    Text = "Player ESP",
+    Default = false,
+    Callback = function(v)
+        if v then
+            for _, plr in ipairs(game.Players:GetPlayers()) do
+                AddESP(plr)
+            end
+        else
+            RemoveESP()
         end
     end
 })
@@ -824,7 +901,8 @@ box:AddToggle("AntiBurn", {
         end
     end
 })
-
+--vouta
+local box = Tabs.Defence:AddRightGroupbox("More")
 box:AddToggle("AntiBlobman", {
     Text = "Anti Blobman",
     Default = false,
@@ -2459,7 +2537,7 @@ do
     local box = Tabs.Keybinds:AddRightGroupbox("VFly")
 
     local vflyEnabled = false
-    local flySpeed = 100
+    local flySpeed = 400
     local bv, bg
 
     local function startVFly()
@@ -2467,6 +2545,11 @@ do
         local char = plr.Character
         if not char or not char:FindFirstChild("HumanoidRootPart") then return end
         local hrp = char.HumanoidRootPart
+        local humanoid = char:FindFirstChild("Humanoid")
+
+        -- Remove fly antigo se existir
+        if hrp:FindFirstChild("VFly_BV") then hrp.VFly_BV:Destroy() end
+        if hrp:FindFirstChild("VFly_BG") then hrp.VFly_BG:Destroy() end
 
         bv = Instance.new("BodyVelocity")
         bv.Name = "VFly_BV"
@@ -2500,6 +2583,7 @@ do
 
                 bv.Velocity = moveDir * flySpeed
                 bg.CFrame = cam.CFrame
+
                 RunService.RenderStepped:Wait()
             end
         end)
@@ -2507,8 +2591,27 @@ do
 
     local function stopVFly()
         vflyEnabled = false
-        if bv then bv:Destroy() end
-        if bg then bg:Destroy() end
+
+        local char = plr.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            local hrp = char.HumanoidRootPart
+            
+            -- Zera a velocidade antes de destruir
+            if bv and bv.Parent then
+                bv.Velocity = Vector3.zero
+                task.wait() -- pequeno delay para aplicar a velocidade zero
+            end
+            
+            if humanoid then
+                humanoid.PlatformStand = false
+            end
+
+            -- Destroi os bodies
+            if bv then bv:Destroy() end
+            if bg then bg:Destroy() end
+        end
+
+        bv, bg = nil, nil
     end
 
     box:AddToggle("VFlyToggle", {
@@ -2542,7 +2645,7 @@ do
         end
     end)
 
-    -- Keybind para ligar/desligar rápido
+    -- Keybind
     box:AddLabel("VFly Keybind"):AddKeyPicker("VFlyKey", {
         Default = "V",
         Text = "Toggle VFly",
@@ -2570,21 +2673,48 @@ toggle:OnChanged(function(v)
 end)
 
 end
--- ==================== BLACKLIST (Apenas Notificação) ====================
-local Blacklist = {}  -- Lista permanente
+-- ==================== BLACKLIST (Persistente com Arquivo) ====================
+local BlacklistFile = "Blacklist_Config.json"
+
+local function SaveBlacklist()
+    local data = {
+        Blacklist = Blacklist or {},
+        Enabled = BlacklistEnabled or false
+    }
+    writefile(BlacklistFile, game:GetService("HttpService"):JSONEncode(data))
+end
+
+local function LoadBlacklist()
+    if isfile(BlacklistFile) then
+        local success, data = pcall(function()
+            return game:GetService("HttpService"):JSONDecode(readfile(BlacklistFile))
+        end)
+        if success then
+            Blacklist = data.Blacklist or {}
+            BlacklistEnabled = data.Enabled or false
+            return true
+        end
+    end
+    Blacklist = {}
+    BlacklistEnabled = false
+    return false
+end
+
+-- Carrega ao iniciar o script
+LoadBlacklist()
 
 do
     local box = Tabs.Blacklist:AddLeftGroupbox("Blacklist")
 
     box:AddToggle("EnableBlacklist", {
         Text = "Enable Blacklist",
-        Default = false,
+        Default = BlacklistEnabled,
         Callback = function(v)
             BlacklistEnabled = v
+            SaveBlacklist()
         end
     })
 
-    -- Lista de jogadores no servidor
     local ServerPlayersDropdown = box:AddDropdown("ServerPlayers", {
         Text = "Jogadores no Servidor",
         Values = {},
@@ -2592,7 +2722,6 @@ do
         Multi = false,
     })
 
-    -- Lista da Blacklist
     local BlacklistDropdown = box:AddDropdown("BlacklistList", {
         Text = "Jogadores na Blacklist",
         Values = {},
@@ -2608,6 +2737,7 @@ do
         if not table.find(Blacklist, name) then
             table.insert(Blacklist, name)
             Library:Notify("✅ " .. name .. " adicionado na Blacklist", 4)
+            SaveBlacklist()
             UpdateBlacklistUI()
         else
             Library:Notify(name .. " já está na blacklist", 3)
@@ -2623,17 +2753,19 @@ do
                 table.remove(Blacklist, idx)
             end
         end
+        SaveBlacklist()
         UpdateBlacklistUI()
     end)
 
     box:AddButton("Limpar Blacklist", function()
         Blacklist = {}
+        SaveBlacklist()
         UpdateBlacklistUI()
         Library:Notify("Blacklist limpa!", 4)
     end)
 
     function UpdateBlacklistUI()
-        -- Atualiza jogadores no servidor
+        -- Jogadores no servidor
         local serverList = {}
         for _, pl in ipairs(Players:GetPlayers()) do
             if pl ~= plr then
@@ -2645,7 +2777,7 @@ do
         end
         ServerPlayersDropdown:SetValues(serverList)
 
-        -- Atualiza Blacklist
+        -- Blacklist
         local blList = {}
         for _, name in ipairs(Blacklist) do
             local pl = Players:FindFirstChild(name)
@@ -2662,7 +2794,7 @@ do
     end
 end
 
--- ==================== NOTIFICAÇÃO QUANDO ENTRAR ====================
+-- Notificação ao entrar
 Players.PlayerAdded:Connect(function(pl)
     task.wait(1.5)
     if not BlacklistEnabled then return end
@@ -2672,10 +2804,17 @@ Players.PlayerAdded:Connect(function(pl)
     end
 end)
 
--- Atualiza listas automaticamente
+-- Atualizações automáticas
 Players.PlayerAdded:Connect(UpdateBlacklistUI)
 Players.PlayerRemoving:Connect(UpdateBlacklistUI)
 UpdateBlacklistUI()
+
+-- Salva quando o jogador sai (opcional, mas bom)
+game.Players.PlayerRemoving:Connect(function(pl)
+    if pl == plr then
+        SaveBlacklist()
+    end
+end)
 
 
 do
